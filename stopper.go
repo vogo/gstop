@@ -19,39 +19,56 @@ package gstop
 
 import "sync"
 
-type Callback func()
+type Task func()
 
 // Stopper the stop status holder.
 type Stopper struct {
-	once      sync.Once
-	stop      chan struct{}
-	callbacks []Callback
+	// channel to control stop status, stop it by calling Stop().
+	C chan struct{}
+
+	once  sync.Once
+	tasks []Task
 }
 
-// Callback add callback func called when stopper stopped.
-func (s *Stopper) Callback(c Callback) {
-	s.callbacks = append(s.callbacks, c)
+// Defer add task called in desc order when stopper stopped.
+func (s *Stopper) Defer(task Task) {
+	s.tasks = append(s.tasks, task)
 }
 
-// Stop stop the chan and call all callbacks.
+// Stop stop the chan and call all tasks.
 func (s *Stopper) Stop() {
 	s.once.Do(func() {
-		close(s.stop)
+		close(s.C)
 
-		for _, callback := range s.callbacks {
-			callback()
+		// call in desc order, like defer.
+		for i := len(s.tasks) - 1; i >= 0; i-- {
+			s.tasks[i]()
 		}
 
 		// help gc
-		s.callbacks = nil
+		s.tasks = nil
 	})
+}
+
+// Loop run task util stopped.
+func (s *Stopper) Loop(task Task) {
+	go func() {
+		for {
+			select {
+			case <-s.C:
+				return
+			default:
+				task()
+			}
+		}
+	}()
 }
 
 // New create a new Stopper.
 func New() *Stopper {
 	return &Stopper{
 		once: sync.Once{},
-		stop: make(chan struct{}),
+		C:    make(chan struct{}),
 	}
 }
 
@@ -59,14 +76,14 @@ func New() *Stopper {
 func NewChild(stop chan struct{}) *Stopper {
 	child := &Stopper{
 		once: sync.Once{},
-		stop: make(chan struct{}),
+		C:    make(chan struct{}),
 	}
 
 	go func() {
 		select {
 		case <-stop:
 			child.Stop()
-		case <-child.stop:
+		case <-child.C:
 		}
 	}()
 
@@ -75,21 +92,21 @@ func NewChild(stop chan struct{}) *Stopper {
 
 // NewChild create a new Stopper as child of the exist one, when which is stopped the child will be stopped too.
 func (s *Stopper) NewChild() *Stopper {
-	return NewChild(s.stop)
+	return NewChild(s.C)
 }
 
 // NewParent create a new Stopper as parent of the exist one, which will be stopped when the new parent stopped.
 func (s *Stopper) NewParent() *Stopper {
 	parent := &Stopper{
 		once: sync.Once{},
-		stop: make(chan struct{}),
+		C:    make(chan struct{}),
 	}
 
 	go func() {
 		select {
-		case <-parent.stop:
+		case <-parent.C:
 			s.Stop()
-		case <-s.stop:
+		case <-s.C:
 		}
 	}()
 

@@ -15,24 +15,43 @@ func TestStopperStop(t *testing.T) {
 	t.Parallel()
 
 	s1 := gstop.New()
-	s1.Callback(func() {
+	s1.Defer(func() {
 		t.Log("s1 stopped")
 	})
+	s1.Loop(func() {
+		t.Log("s1 task run")
+		time.Sleep(time.Millisecond)
+	})
+
+	go func() {
+		ticker := time.NewTicker(time.Millisecond)
+
+		for {
+			select {
+			case <-s1.C:
+				return
+			case <-ticker.C:
+				t.Log("tick")
+			}
+		}
+	}()
 
 	s2 := s1.NewChild()
-	s2.Callback(func() {
+	s2.Defer(func() {
 		t.Log("s2 stopped")
 	})
 
 	s3 := s2.NewChild()
-	s3.Callback(func() {
+	s3.Defer(func() {
 		t.Log("s3 stopped")
 	})
 
 	s4 := s3.NewChild()
-	s4.Callback(func() {
+	s4.Defer(func() {
 		t.Log("s4 stopped")
 	})
+
+	time.Sleep(goroutineScheduleInterval)
 
 	s1.Stop()
 
@@ -49,11 +68,11 @@ func TestStopper(t *testing.T) {
 		status2 int64
 	)
 
-	s.Callback(func() {
+	s.Defer(func() {
 		atomic.StoreInt64(&status1, 1)
 	})
 
-	s.Callback(func() {
+	s.Defer(func() {
 		atomic.StoreInt64(&status2, 2)
 	})
 
@@ -88,11 +107,11 @@ func doTestParentChildStopper(t *testing.T, parent, child *gstop.Stopper) {
 		status2 int64
 	)
 
-	child.Callback(func() {
+	child.Defer(func() {
 		atomic.StoreInt64(&status1, 1)
 	})
 
-	parent.Callback(func() {
+	parent.Defer(func() {
 		atomic.StoreInt64(&status2, 2)
 	})
 
@@ -112,7 +131,7 @@ func TestNewChildFromChan(t *testing.T) {
 
 	var status1 int64
 
-	s.Callback(func() {
+	s.Defer(func() {
 		atomic.AddInt64(&status1, 1)
 	})
 
