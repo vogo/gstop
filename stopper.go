@@ -17,27 +17,35 @@
 
 package gstop
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 type Task func()
 
-// Stopper the stop status holder.
+// Stopper the stop status struct.
 type Stopper struct {
 	// channel to control stop status, stop it by calling Stop().
 	C chan struct{}
 
-	once   sync.Once
+	done   uint32
+	m      sync.Mutex
 	defers []Task
 }
 
-// Defer add task called in desc order when stopper stopped.
+// Defer add task called in desc order when stopper is stopped.
 func (s *Stopper) Defer(task Task) {
-	s.defers = append(s.defers, task)
+	s.doSlow(func() {
+		s.defers = append(s.defers, task)
+	})
 }
 
-// Stop the chan and call all defers.
+// Stop close the chan and call all defers.
 func (s *Stopper) Stop() {
-	s.once.Do(func() {
+	s.doSlow(func() {
+		defer atomic.StoreUint32(&s.done, 1)
+
 		close(s.C)
 
 		// call in desc order, like defer.
@@ -50,7 +58,20 @@ func (s *Stopper) Stop() {
 	})
 }
 
-// Loop run task util stopped.
+// doSlow do func in order only when not done.
+// see sync.Once.
+func (s *Stopper) doSlow(f func()) {
+	if atomic.LoadUint32(&s.done) == 0 {
+		s.m.Lock()
+		defer s.m.Unlock()
+
+		if s.done == 0 {
+			f()
+		}
+	}
+}
+
+// Loop run task util the stopper is stopped.
 func (s *Stopper) Loop(task Task) {
 	go func() {
 		for {
@@ -67,16 +88,16 @@ func (s *Stopper) Loop(task Task) {
 // New create a new Stopper.
 func New() *Stopper {
 	return &Stopper{
-		once: sync.Once{},
-		C:    make(chan struct{}),
+		m: sync.Mutex{},
+		C: make(chan struct{}),
 	}
 }
 
-// NewChild create a new Stopper as child of the exist chan, when which is closed the child will be stopped too.
+// NewChild create a new Stopper as child of the exists chan, when which is closed the child will be stopped too.
 func NewChild(stop chan struct{}) *Stopper {
 	child := &Stopper{
-		once: sync.Once{},
-		C:    make(chan struct{}),
+		m: sync.Mutex{},
+		C: make(chan struct{}),
 	}
 
 	go func() {
@@ -90,16 +111,16 @@ func NewChild(stop chan struct{}) *Stopper {
 	return child
 }
 
-// NewChild create a new Stopper as child of the exist one, when which is stopped the child will be stopped too.
+// NewChild create a new Stopper as child of the exists one, when which is stopped the child will be stopped too.
 func (s *Stopper) NewChild() *Stopper {
 	return NewChild(s.C)
 }
 
-// NewParent create a new Stopper as parent of the exist one, which will be stopped when the new parent stopped.
+// NewParent create a new Stopper as parent of the exists one, which will be stopped when the new parent stopped.
 func (s *Stopper) NewParent() *Stopper {
 	parent := &Stopper{
-		once: sync.Once{},
-		C:    make(chan struct{}),
+		m: sync.Mutex{},
+		C: make(chan struct{}),
 	}
 
 	go func() {
