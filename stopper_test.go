@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package gstop_test
 
 import (
@@ -15,23 +32,29 @@ func TestStopperStop(t *testing.T) {
 	t.Parallel()
 
 	s1 := gstop.New()
+
 	s1.Defer(func() {
-		t.Log("s1 stopped")
+		t.Log("s1 stopped 2")
 	})
+	s1.Defer(func() {
+		t.Log("s1 stopped 1")
+	})
+
+	// loop run task until s1 closed.
 	s1.Loop(func() {
-		t.Log("s1 task run")
-		time.Sleep(time.Millisecond)
+		t.Log("s1 run loop task")
+		time.Sleep(time.Millisecond * 3)
 	})
 
 	go func() {
-		ticker := time.NewTicker(time.Millisecond)
+		ticker := time.NewTicker(time.Millisecond * 2)
 
 		for {
 			select {
 			case <-s1.C:
 				return
 			case <-ticker.C:
-				t.Log("tick")
+				t.Log("run ticker task until s1 stopped")
 			}
 		}
 	}()
@@ -44,11 +67,6 @@ func TestStopperStop(t *testing.T) {
 	s3 := s2.NewChild()
 	s3.Defer(func() {
 		t.Log("s3 stopped")
-	})
-
-	s4 := s3.NewChild()
-	s4.Defer(func() {
-		t.Log("s4 stopped")
 	})
 
 	time.Sleep(goroutineScheduleInterval)

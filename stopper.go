@@ -26,27 +26,27 @@ type Stopper struct {
 	// channel to control stop status, stop it by calling Stop().
 	C chan struct{}
 
-	once  sync.Once
-	tasks []Task
+	once   sync.Once
+	defers []Task
 }
 
 // Defer add task called in desc order when stopper stopped.
 func (s *Stopper) Defer(task Task) {
-	s.tasks = append(s.tasks, task)
+	s.defers = append(s.defers, task)
 }
 
-// Stop stop the chan and call all tasks.
+// Stop the chan and call all defers.
 func (s *Stopper) Stop() {
 	s.once.Do(func() {
 		close(s.C)
 
 		// call in desc order, like defer.
-		for i := len(s.tasks) - 1; i >= 0; i-- {
-			s.tasks[i]()
+		for i := len(s.defers) - 1; i >= 0; i-- {
+			s.defers[i]()
 		}
 
 		// help gc
-		s.tasks = nil
+		s.defers = nil
 	})
 }
 
