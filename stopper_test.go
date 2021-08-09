@@ -94,7 +94,9 @@ func TestStopper(t *testing.T) {
 		atomic.StoreInt64(&status2, 2)
 	})
 
-	s.Stop()
+	s.StopWith(func() {
+		t.Log("s stopped")
+	})
 
 	assert.Equal(t, int64(1), atomic.LoadInt64(&status1))
 	assert.Equal(t, int64(2), atomic.LoadInt64(&status2))

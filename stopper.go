@@ -41,24 +41,36 @@ func (s *Stopper) Defer(task Task) {
 	})
 }
 
-// Stop close the chan and call all defers.
+// doStop do stop work, include closing the chan and calling all defers.
+func (s *Stopper) doStop() {
+	defer atomic.StoreUint32(&s.done, 1)
+
+	close(s.C)
+
+	// call in desc order, like defer.
+	for i := len(s.defers) - 1; i >= 0; i-- {
+		s.defers[i]()
+	}
+
+	// help gc
+	s.defers = nil
+}
+
+// Stop close the stopper.
 func (s *Stopper) Stop() {
+	s.doSlow(s.doStop)
+}
+
+// StopWith stop the stopper and execute the task.
+// the same as calling Defer(task) first, and then calling Stop().
+func (s *Stopper) StopWith(task Task) {
 	s.doSlow(func() {
-		defer atomic.StoreUint32(&s.done, 1)
-
-		close(s.C)
-
-		// call in desc order, like defer.
-		for i := len(s.defers) - 1; i >= 0; i-- {
-			s.defers[i]()
-		}
-
-		// help gc
-		s.defers = nil
+		s.defers = append(s.defers, task)
+		s.doStop()
 	})
 }
 
-// doSlow do func in order only when not done.
+// doSlow do func synchronously if the stopper has not been stopped.
 // see sync.Once.
 func (s *Stopper) doSlow(f func()) {
 	if atomic.LoadUint32(&s.done) == 0 {
@@ -72,6 +84,7 @@ func (s *Stopper) doSlow(f func()) {
 }
 
 // Loop run task util the stopper is stopped.
+// Note, there is not an interval between the executions of two tasks.
 func (s *Stopper) Loop(task Task) {
 	go func() {
 		for {
